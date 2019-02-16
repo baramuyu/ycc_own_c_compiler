@@ -1,6 +1,7 @@
 ycc: ycc.c
 
 test: ycc
+	./ycc -test
 	./test.sh
 
 clean:
