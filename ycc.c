@@ -6,8 +6,14 @@
 
 // number that represents type of token
 enum {
-  TK_NUM = 256,
-  TK_EOF,
+  TK_NUM = 256, // integer token
+  TK_IDENT = 257,     // idetifier
+  TK_EOF,       // end of token
+};
+
+enum {
+  ND_NUM = 256,     // type of integer node
+  ND_IDENT = 257,         // type of identifier node; 257
 };
 
 // type of token
@@ -18,15 +24,12 @@ typedef struct {
 } Token;
 
 
-enum {
-  ND_NUM = 256,     // Type of integer nodes
-};
-
 typedef struct Node {
   int ty;           // operator or ND_NUM
   struct Node *lhs; // left side
   struct Node *rhs; // right side
   int val;          // if ty is ND_NUM
+  //char name;      // if ty is ND_IDENT <-- didn't use
 } Node;
 
 typedef struct {
@@ -56,6 +59,8 @@ void vec_push(Vector *vec, void *elem){
 // no more than 100 tokens 
 Token tokens[100];
 
+Node *code[100];
+
 // report error
 void error(char message[], char *p) {
   fprintf(stderr, "%s: %s\n", message, p);
@@ -75,6 +80,13 @@ Node *new_node(int ty, Node *lhs, Node *rhs) {
 Node *new_node_num(int val) {
   Node *node = malloc(sizeof(Node));
   node->ty = ND_NUM;
+  node->val = val;
+  return node;
+}
+
+Node *new_node_ident(int val) { // <-- needed
+  Node *node = malloc(sizeof(Node));
+  node->ty = ND_IDENT;
   node->val = val;
   return node;
 }
@@ -114,6 +126,11 @@ Node *term() {
   if (tokens[pos].ty == TK_NUM)
     return new_node_num(tokens[pos++].val);
 
+  // variables
+  if (tokens[pos].ty == TK_IDENT)
+    return new_node_ident(tokens[pos++].val);
+
+
   error("The token is neither number nor parentheses", tokens[pos].input);
 }
 
@@ -130,19 +147,77 @@ Node *mul() {
   }
 }
 
+Node *assign() { // <-- needed
+  Node *node = add();
+
+  for(;;){
+    if(consume('='))
+      node = new_node('=', node, assign());
+    else
+      return node;
+  }
+}
+
+Node *stmt(){
+  Node *node = assign();
+  if (!consume(';')){
+    error("The token is not ';'", tokens[pos].input);
+  }
+  return node; // <-- needed
+}
+
+void program(){
+  int i = 0;
+  while(tokens[pos].ty != TK_EOF)
+    code[i++] = stmt();
+  code[i] = NULL;
+}
+
+
+void gen_lval(Node *node){
+  if (node->ty != ND_IDENT){
+    error("Lvalue is not a variable", NULL);
+  }
+
+  int offset = ('z' - node->val +1) * 8; // <- instead of node->name
+  printf("  mov rax, rbp\n");
+  printf("  sub rax, %d\n", offset);
+  printf("  push rax\n");
+}
 
 // use stack
 void gen(Node *node) {
+  // number
   if (node->ty == ND_NUM) {
     printf("  push %d\n", node->val);
     return;
   }
 
+  // variable?
+  if (node->ty == ND_IDENT){
+    gen_lval(node); //RAX is stack top
+    printf("  pop rax\n");
+    printf("  mov rax, [rax]\n");
+    printf("  push rax\n"); // push address of RAX
+    return;
+  }
+
+  if (node->ty == '='){
+    gen_lval(node->lhs); //RAX is stack top
+    gen(node->rhs);
+
+    printf("  pop rdi\n");
+    printf("  pop rax\n");
+    printf("  mov [rax], rdi\n");
+    printf("  push rdi\n"); // push address of RDI
+    return;
+  }
+
   gen(node->lhs);
   gen(node->rhs);
-
   printf("  pop rdi\n");
   printf("  pop rax\n");
+
 
   switch (node->ty){
   case '+':
@@ -172,9 +247,26 @@ void tokenize(char *p){
       continue;
     }
 
-    if (*p == '+' || *p == '-' || *p == '*' || *p == '/' || *p == '(' || *p == ')'){
+    if (*p == '+' \
+        || *p == '-' \
+        || *p == '*' \
+        || *p == '/' \
+        || *p == '(' \
+        || *p == ')' \
+        || *p == ';' \
+        || *p == '=' 
+        ){
       tokens[i].ty = *p;
-      tokens[i].input = p;  // why here is not pointer?
+      tokens[i].input = p;
+      i++;
+      p++;
+      continue;
+    }
+
+    if ('a' <= *p && *p <= 'z'){
+      tokens[i].ty = TK_IDENT;
+      tokens[i].input = p;
+      tokens[i].val = *p;
       i++;
       p++;
       continue;
@@ -228,10 +320,10 @@ void runtest(){
 //-------------------------
 
 int main(int argc, char **argv){
-	if (argc != 2){
-		fprintf(stderr, "number of arguments is incorrect.");
-		return 1;
-	}
+  if (argc != 2){
+    fprintf(stderr, "number of arguments is incorrect.");
+    return 1;
+  }
 
   if (strcmp(argv[1],"-test") == 0){
     runtest();
@@ -240,17 +332,29 @@ int main(int argc, char **argv){
 
   // tokenize
   tokenize(argv[1]);
-  Node *node = add();
-
+  program();
+  
   // output first half of assembly
   printf(".intel_syntax noprefix\n");
   printf(".global main\n");
   printf("main:\n");
 
-  // generate codes
-  gen(node);
+  // prologue
+  printf("  push rbp\n");
+  printf("  mov rbp, rsp\n");
+  printf("  sub rsp, 208\n"); // 26 alphabet * 8 bite
 
-  printf(" pop rax\n");
-  printf(" ret\n");
+  // generate codes
+  for (int i = 0; code[i]; i++){
+    gen(code[i]);
+
+    // should be one number left in the stack
+    printf("  pop rax\n");
+  }
+
+  // epilogue
+  printf("  mov rsp, rbp\n");
+  printf("  pop rbp\n");
+  printf("  ret\n");
   return 0;
 }
