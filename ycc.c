@@ -38,6 +38,11 @@ typedef struct {
   int len;
 } Vector;
 
+typedef struct {
+  Vector *keys;
+  Vector *vals;
+} Map;
+
 Vector *new_vector()
 {
   Vector *vec = malloc(sizeof(Vector));
@@ -53,6 +58,27 @@ void vec_push(Vector *vec, void *elem){
     vec->data = realloc(vec->data, sizeof(void *) * vec->capacity);
   }
   vec->data[vec->len++] = elem;
+}
+
+Map *new_map(){
+  Map *map = malloc(sizeof(Map));
+  map->keys = new_vector();
+  map->vals = new_vector();
+  return map;
+}
+
+void map_put(Map *map, char *key, void *val){
+  vec_push(map->keys, key);
+  vec_push(map->vals, val);
+}
+
+void *map_get(Map *map, char *key){
+  for (int i = map->keys->len - 1; i >= 0; i--){
+    if (strcmp(map->keys->data[i], key) == 0){
+      return map->vals->data[i];
+    }
+  }
+  return NULL;
 }
 
 // array of tokens after tokenize
@@ -293,13 +319,14 @@ void tokenize(char *p){
 //-------------------------
 void expect(int line, int expected, int actual){
   if (expected == actual)
+    fprintf(stderr, "Line %d => %d\n", line, actual);
     return;
-  fprintf(stderr, "%d: %d expected, but got %d\n", 
+  fprintf(stderr, "Line %d: %d expected, but got %d\n", 
     line, expected, actual);
   exit(1);
 }
 
-void runtest(){
+void test_vector(){
   Vector *vec = new_vector();
   expect(__LINE__, 0, vec->len);
 
@@ -315,6 +342,26 @@ void runtest(){
   printf("OK\n");
 }
 
+void test_map(){
+  Map *map = new_map();
+  expect(__LINE__, 0, (int)map_get(map, "foo"));
+
+  map_put(map, "foo", (void *)2);
+  expect(__LINE__, 2, (int)map_get(map, "foo"));
+
+  map_put(map, "bar", (void *)4);
+  expect(__LINE__, 4, (int)map_get(map, "bar"));
+
+  map_put(map, "foo", (void *)6);
+  expect(__LINE__, 6, (int)map_get(map, "foo"));
+}
+
+void runtest(){
+  printf("--test vector\n");
+  test_vector();
+  printf("--test map\n");
+  test_map();
+}
 //-------------------------
 // ending unittest
 //-------------------------
