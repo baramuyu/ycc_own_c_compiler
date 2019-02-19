@@ -16,7 +16,7 @@ try(){
 	fi
 }
 
-try '0;' 0;
+try "0;" 0;
 try '42;' 42
 try '1+1;' 2
 try '5+20-4;' 21
@@ -32,5 +32,6 @@ try 'a = 2;' 2
 try 'a = 2; b = 3; a + b;' 5
 try 'c = 2; d = 8; d - c;' 6
 try 'a = b = 2; a * b;' 4
-try 'a = 8; b = 2; a / b;' 4 
+try "a = 8; b = 2; a / b;" 4
+try "abc = 1; abd = 2; abc + abd;" 3
 echo OK

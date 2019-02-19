@@ -3,23 +3,28 @@
 #include <stdlib.h>
 #include <ctype.h>
 #include <string.h>
+#include <stdint.h>
+
 
 // number that represents type of token
 enum {
   TK_NUM = 256, // integer token
-  TK_IDENT = 257,     // idetifier
+  TK_IDENT,     // idetifier
   TK_EOF,       // end of token
 };
 
 enum {
   ND_NUM = 256,     // type of integer node
-  ND_IDENT = 257,         // type of identifier node; 257
+  ND_IDENT,   // type of identifier node; 257
 };
 
 // type of token
 typedef struct {
   int ty;       // type of token
   int val;      // if ty is TK_NUM, its number
+  char *name;
+  int *end;
+  int *start;
   char *input;  // token str for error message 
 } Token;
 
@@ -29,7 +34,7 @@ typedef struct Node {
   struct Node *lhs; // left side
   struct Node *rhs; // right side
   int val;          // if ty is ND_NUM
-  //char name;      // if ty is ND_IDENT <-- didn't use
+  char name;      // if ty is ND_IDENT <-- didn't use
 } Node;
 
 typedef struct {
@@ -72,6 +77,7 @@ void map_put(Map *map, char *key, void *val){
   vec_push(map->vals, val);
 }
 
+
 void *map_get(Map *map, char *key){
   for (int i = map->keys->len - 1; i >= 0; i--){
     if (strcmp(map->keys->data[i], key) == 0){
@@ -81,11 +87,26 @@ void *map_get(Map *map, char *key){
   return NULL;
 }
 
+void *map_geti(Map *map, char *key, int default_){
+  for (int i = map->keys->len - 1; i >= 0; i--){
+    if (!strcmp(map->keys->data[i], key)){
+      return (intptr_t)map->vals->data[i];
+    }
+  }
+  return default_;
+}
+
 // array of tokens after tokenize
 // no more than 100 tokens 
 Token tokens[100];
 
 Node *code[100];
+
+static Map *keywords;
+static Map *keyword_map() {
+  Map *map = new_map();
+  return map;
+}
 
 // report error
 void error(char message[], char *p) {
@@ -114,6 +135,14 @@ Node *new_node_ident(int val) { // <-- needed
   Node *node = malloc(sizeof(Node));
   node->ty = ND_IDENT;
   node->val = val;
+  return node;
+}
+
+Node *local_variable(Token *t){
+  Node *node = malloc(sizeof(Node));
+  node->ty = ND_IDENT;
+  node->name = t->name;
+  node->val = t->val;
   return node;
 }
 
@@ -154,8 +183,8 @@ Node *term() {
 
   // variables
   if (tokens[pos].ty == TK_IDENT)
-    return new_node_ident(tokens[pos++].val);
-
+    return local_variable(&tokens[pos++]);
+    //return new_node_ident(tokens[pos++].val);
 
   error("The token is neither number nor parentheses", tokens[pos].input);
 }
@@ -177,8 +206,9 @@ Node *assign() { // <-- needed
   Node *node = add();
 
   for(;;){
-    if(consume('='))
+    if(consume('=')){
       node = new_node('=', node, assign());
+    }
     else
       return node;
   }
@@ -204,8 +234,7 @@ void gen_lval(Node *node){
   if (node->ty != ND_IDENT){
     error("Lvalue is not a variable", NULL);
   }
-
-  int offset = ('z' - node->val +1) * 8; // <- instead of node->name
+  int offset = ('z' - node->name +1) * 8; // here has to fix for multi-string variables
   printf("  mov rax, rbp\n");
   printf("  sub rax, %d\n", offset);
   printf("  push rax\n");
@@ -263,8 +292,24 @@ void gen(Node *node) {
   printf("  push rax\n");
 }
 
+static char *ident(char *p, Token *t){
+  int len = 1;
+  while ('a' <= p[len] && p[len] <= 'z')
+    len++;
+
+  char *name = strndup(p, len);
+  int ty = map_geti(keywords, name, TK_IDENT);
+  t->ty = ty;
+  t->name = *name;
+  t->start = p;
+  t->end = p + len;
+  return p + len;
+}
 
 void tokenize(char *p){
+  if (!keywords)
+    keywords = keyword_map();
+
   int i = 0;
   while (*p){
     // skip empty str
@@ -272,7 +317,6 @@ void tokenize(char *p){
       p++;
       continue;
     }
-
     if (*p == '+' \
         || *p == '-' \
         || *p == '*' \
@@ -290,11 +334,8 @@ void tokenize(char *p){
     }
 
     if ('a' <= *p && *p <= 'z'){
-      tokens[i].ty = TK_IDENT;
-      tokens[i].input = p;
-      tokens[i].val = *p;
+      p = ident(p, &tokens[i]);
       i++;
-      p++;
       continue;
     }
 
@@ -343,6 +384,7 @@ void test_vector(){
 }
 
 void test_map(){
+  enum
   Map *map = new_map();
   expect(__LINE__, 0, (int)map_get(map, "foo"));
 
@@ -354,6 +396,19 @@ void test_map(){
 
   map_put(map, "foo", (void *)6);
   expect(__LINE__, 6, (int)map_get(map, "foo"));
+
+  // test map_geti
+  Map *mapi = new_map();
+  expect(__LINE__, TK_IDENT, (int)map_geti(mapi, "foo", TK_IDENT));
+
+  map_put(mapi, "foo", (void *)2);
+  expect(__LINE__, 2, (int)map_geti(mapi, "foo", TK_IDENT));
+
+  map_put(mapi, "bar", (void *)4);
+  expect(__LINE__, 4, (int)map_geti(mapi, "bar", TK_IDENT));
+
+  map_put(mapi, "foo", (void *)6);
+  expect(__LINE__, 6, (int)map_geti(mapi, "foo", TK_IDENT));
 }
 
 void runtest(){
